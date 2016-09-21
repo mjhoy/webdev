@@ -48,7 +48,7 @@ assert_conf_has_keys "config file #{conf_path}", conf, Array, "sites"
 
 script = File.expand_path(__FILE__)
 script = File.readlink script if File.symlink?(script)
-webdev_dir = File.dirname(File.dirname(script))
+webdev_dir = File.dirname(script)
 
 servers = {}
 

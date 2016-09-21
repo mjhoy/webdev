@@ -1,0 +1,9 @@
+# -*- mode: yaml -*-
+
+sites:
+  - name: "blog"
+    repo: "~/projects/blog"
+    type: "ubuntu14.04"
+  - name: "super-cool-webapp"
+    repo: "~/projects/webapp"
+    type: "centos6"
