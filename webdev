@@ -1,0 +1,142 @@
+#!/usr/bin/env ruby -w
+
+require 'yaml'
+require 'optparse'
+require 'csv'
+
+options = {
+  verbose: false,
+  config_path: (File.expand_path("~/.webdev"))
+}
+
+def exit_err str; abort "error: #{str}"; end
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: webdev [options] action"
+
+  opts.on("-v", "--no-verbose", "Run verbosely") do |v|
+    options[:verbose] = v
+  end
+
+  opts.on("", "--config=PATH", "Path to webdev config (defaults to ~/.webdev)") do |v|
+    options[:config_path] = File.expand_path(v)
+  end
+end.parse!
+
+conf_path = options[:config_path]
+
+exit_err "#{conf_path} doesn't exist" unless File.exist? conf_path
+
+conf_string = File.read conf_path
+
+conf = YAML.load conf_string
+
+exit_err "couldn't parse #{conf_path}" unless conf
+
+def assert_conf_has_keys name, obj, klass, *keys
+  keys.each do |key|
+    if !obj.has_key? key || obj[key].nil?
+      exit_err "expected \"#{key}\" to be defined in #{name}"
+    elsif obj[key].class != klass
+      got = obj[key].class
+      exit_err "expected \"#{key}\" to be type #{klass}, was #{got}, defined in #{name}"
+    end
+  end
+end
+
+assert_conf_has_keys "config file #{conf_path}", conf, Array, "sites"
+
+script = File.expand_path(__FILE__)
+script = File.readlink script if File.symlink?(script)
+webdev_dir = File.dirname(File.dirname(script))
+
+servers = {}
+
+class Server
+  attr_accessor :type
+
+  def initialize root_dir, type
+    @root_dir = root_dir
+    @type = type
+    @sites = []
+  end
+
+  def add_site site; @sites.push site; end
+  def vagrant_dir; File.join(@root_dir, type); end
+
+  def vagrant_command command, *options
+    retval = ""
+    Dir.chdir(File.join(@root_dir, type)) do
+      retval = %x[vagrant --machine-readable #{command} #{options.join(" ")}]
+    end
+    retval
+  end
+
+  def status
+    data = CSV.parse vagrant_command "status"
+    ret = :unknown
+    data.each do |line|
+      if line[2] == "state"
+        ret = line[3]
+      end
+    end
+
+    exit_err "can't read VM status, this is a bug!" if ret == :unknown
+    ret
+  end
+
+  def print_status
+    s = status
+    site_names = @sites.map(&:name).join(", ")
+    header = "#{self.type}"
+
+    puts header
+    puts "=" * header.length
+    puts "   Repo: #{vagrant_dir}"
+    puts " Status: #{s}"
+    puts "  Sites: #{site_names}"
+    puts ""
+  end
+end
+
+class Site
+  attr_accessor :name
+
+  def initialize name, repo
+    @name = name
+    @repo = repo
+  end
+end
+
+conf["sites"].each do |site|
+  assert_conf_has_keys "site defined in #{conf_path}", site, String, "name"
+  name = site["name"]
+  assert_conf_has_keys "site #{name} in #{conf_path}", site, String, "type", "repo"
+  type = site["type"]
+  repo = site["repo"]
+
+  site = Site.new name, repo
+
+  server = servers[type]
+
+  if server.nil?
+    server = Server.new webdev_dir, type
+    servers[type] = server
+  end
+
+  server.add_site site
+end
+
+command = ARGV[0]
+
+case command
+when "status"
+  servers.each do |type, server|
+    server.print_status
+  end
+
+when nil
+  exit_err "no command given"
+else
+  exit_err "unknown command #{command}"
+end
